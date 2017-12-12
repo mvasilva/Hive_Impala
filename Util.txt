@@ -1,0 +1,89 @@
+
+### 1. Modelagem Hive
+
+```sql
+create database if not exists log_wol location '/db/log_wol';
+
+create external table log_wol.logs (
+servidor string,
+horario_acesso timestamp,
+url string,
+distpositivo string,
+navegador string,
+id_browser string,
+caracteristica_leitor array<int>
+)
+partitioned by (dt bigint)
+row format delimited fields terminated by '|'
+collection items terminated by ','
+stored as textfile
+location '/db/log_wol/logs';
+
+create external table log_wol.logs_stage (
+servidor string,
+horario_acesso timestamp,
+url string,
+distpositivo string,
+navegador string,
+id_browser string,
+caracteristica_leitor array<int>
+)
+row format delimited fields terminated by '|'
+stored as textfile
+location '/user/cloudera/massa_de_exemplo';
+
+set hive.exec.dynamic.partition.mode=nonstrict;
+from log_wol.logs_stage stg
+insert into table log_wol.logs partition(dt)
+select stg.servidor, stg.horario_acesso , stg.url, stg.distpositivo, stg.navegador, stg.id_browser, stg.caracteristica_leitor,
+cast(from_unixtime(unix_timestamp(stg.horario_acesso), 'YYYYMMdd') as bigint);
+
+```
+
+### 2. Tabela Impala
+
+```sql
+create table log_wol.LOG_PARQUET
+STORED AS PARQUET
+AS
+SELECT 
+	servidor, horario_acesso , url, distpositivo, navegador, id_browser
+from
+	log_wol.logs_stage
+```
+
+### 3. Consultas por RM
+
+SELECT
+    servidor RM,
+    COUNT(1) NUM_OCORRENCIAS
+FROM
+    log_wol.LOG_PARQUET
+WHERE
+    servidor IN("front31257", "front31254")
+GROUP BY
+    servidor
+
+
+
+### 4. Implementação do pedido extra
+
+CREATE EXTERNAL TABLE log_wol.web_logs_raw_categoria (
+  categoria STRING
+)
+ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.RegexSerDe'
+WITH SERDEPROPERTIES (
+   "input.regex" = "^.*\\s\\/([a-z]+)\\/.*$"
+   )
+LOCATION '/user/cloudera/massa_raw';
+
+select
+    categoria,
+    count(1)
+FROM 
+    log_wol.web_logs_raw_categoria
+GROUP BY
+    categoria
+ORDER BY 
+    categoria DESC
+LIMIT 10;
